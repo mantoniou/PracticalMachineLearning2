@@ -1,0 +1,238 @@
+---
+title: "Predicting outcome from Human Activity Recognition dataset"
+author: "Manos Antoniou"
+date: "Thursday, April 23, 2015"
+output: html_document
+---
+***
+
+## Introduction
+Human Activity Recognition has emerged as a key research area in the 
+last years and is gaining increasing attention by the pervasive computing research, 
+especially for the development of context-aware systems. There are many potential 
+applications for HAR ^1^.  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to
+collect a large amount of data about human activity relatively inexpensively. 
+These type of devices are part of the quantified self movement – a group of 
+enthusiasts who take measurements about themselves regularly to improve their health, 
+to find patterns in their behaviour, or because they are tech geeks. One thing that
+people regularly do is quantify how much of a particular activity they do, but they
+rarely quantify how well they do it.  
+Particularly in this project, the investigated dataset is collected from accelerometers on the 
+belt, forearm, arm, and dumbell of 6 participants. They were asked to perform 
+barbell lifts correctly and incorrectly in 5 different ways.  
+
+* Exactly according to the specification (Class A)  
+* Throwing the elbows to the front (Class B)  
+* Lifting the dumbbell only halfway (Class C)  
+* Lowering the dumbbell only halfway (Class D)  
+* Throwing the hips to the front (Class E)  
+
+The goal is to predict the **manner in which they did the exercise**.
+
+
+## Methods
+
+### Exploratory Analysis
+At first it is important to import the training and testing dataset
+
+```{r, message=FALSE,warning=FALSE}
+library(ggplot2)
+library(ElemStatLearn)
+library(caret)
+library(randomForest)
+library(rattle)
+library(rpart.plot)
+
+setwd("C:/Dropbox/Projects/R/Environment")
+# Check if zip file exists on working directory and if not, it downloads it
+if (!file.exists("pml-training.csv")) {
+        fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+        download.file(fileUrl, destfile="./pml-training.csv") 
+}
+
+if (!file.exists("pml-testing.csv")) {
+        fileUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+        download.file(fileUrl, destfile="./pml-testing.csv") 
+}
+
+# Insert the training and testing datasets by assigning NA to all null values
+training <- read.csv("pml-training.csv", header = TRUE, sep = ",", quote = "\"", na.strings=c("NA",""))
+testing <- read.csv("pml-testing.csv", header = TRUE, sep = ",", quote = "\"", na.strings=c("NA",""))
+```
+
+There are **19622** observations and **160** variables in the training dataset. It is
+important to check if all variables are useful or we can ignore some, in order 
+to produce a more accurate prediction model.  
+Firstly, we can ignore the first **7** variables as they don't include any actual
+measure data. Then it's very important to have a look on how many missing values 
+each column has. It appears that 100 variables consist of more than **98%** with 
+missing values. On the other hand, the remaining **60** have none. It is clear that 
+we have to **ignore all 100 variables** with the missing values and the **first 7** 
+variables. So we will work with 53 variables. 
+
+```{r, message=FALSE,warning=FALSE}
+# Create a dataframe with the sum of missing values per column
+training.na <- as.data.frame(apply(X=training,2,FUN=function(x) length(which(is.na(x)))))
+names(training.na) <- "Missing Values"
+training.na
+
+# Keep just the non NA's columns
+training1 <- training[,colSums(is.na(training)) < 2]
+
+# Delete the first 7 columns, because they are not necessary 
+training1 <- training1[,8:60]
+
+# Apply the column reduction to the testing dataset as well
+testing1 <- testing[,names(training1[,1:52])]
+
+```
+
+It is also important to check how many observations of each classe outcome there
+are. There are more than 5500 abservations with "A" as outcome and around 3700-3800 
+observations for each of the rest (B,C,D,E) which is not bad. 
+
+```{r, echo=FALSE, message=FALSE,warning=FALSE,fig.height=10, fig.width=15}
+g <- ggplot(training1, aes(classe))
+g + geom_bar(fill="lightgoldenrod1", colour="lightgoldenrod4")+
+        xlab("") + ylab("")+
+        theme(axis.text.y=element_text(size=20), axis.text.x=element_text(size=14,face="bold"))+
+        ggtitle("How many counts per different classe (outcome) \n")
+
+```
+
+### Statistical Inference & Modelling
+
+I chose two different approaches for developing the algorithm. The first one is 
+classification trees ^2^ (method = rpart) and the second is to use the random forest ^3^ algorithm.  
+The fist prediction model was build by using the rpart method of the caret package.
+Then we ploted the decision tree.
+
+```{r, cache=TRUE}
+# Apply a prediction Model with all variables
+model.all <- train(classe ~ ., method="rpart", data = training1)
+
+# Plot the model
+fancyRpartPlot(model.all$finalModel)
+```
+
+In order to check the accuracy rate of the model, we print the confusion Matrix. 
+The accuracy rate **(around 50%) is low**, so a further investigation is necessary.
+
+```{r }
+# Apply the prediction
+prediction <- predict(model.all, newdata= training1)
+# Check the accuracy of the  prediction model
+print(confusionMatrix(prediction, training1$classe), digits=4)
+```
+
+It seems that a good idea is to use **cross validation** in order to achieve more 
+accurate results. Since we have a large training set (19622 obs) we can split it
+in **10 equal datasets** (around 1960 observations each)
+
+```{r }
+# Create 10 sets of data
+set.seed(1)
+ids <- createDataPartition(y=training1$classe, p=1/10, list=FALSE)
+group1 <- training1[ids,]
+remain1 <- training1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/9, list=FALSE)
+group2 <- remain1[ids,]
+remain1 <- remain1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/8, list=FALSE)
+group3 <- remain1[ids,]
+remain1 <- remain1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/7, list=FALSE)
+group4 <- remain1[ids,]
+remain1 <- remain1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/6, list=FALSE)
+group5 <- remain1[ids,]
+remain1 <- remain1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/5, list=FALSE)
+group6 <- remain1[ids,]
+remain1 <- remain1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/4, list=FALSE)
+group7 <- remain1[ids,]
+remain1 <- remain1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/3, list=FALSE)
+group8 <- remain1[ids,]
+remain1 <- remain1[-ids,]
+
+set.seed(1)
+ids <- createDataPartition(y=remain1$classe, p=1/2, list=FALSE)
+group9 <- remain1[ids,]
+group10 <- remain1[-ids,]
+```
+
+Now we apply the random forest algorithm in order to build our prediction model
+for the first group dataset (group1). The **"in the sample error"** is almost **0%**, which
+is great but it may indicates overfitting. It is important to check the **out of sample error** as well.
+
+```{r, cache=TRUE}
+# Apply a prediction Model with all variables
+set.seed(1)
+model.rm <- randomForest(classe ~ ., data = group1, importance = FALSE)
+
+# Apply the prediction
+prediction <- predict(model.rm, newdata= group1)
+
+# Check the accuracy of the  prediction model
+print(confusionMatrix(prediction, group1$classe), digits=4)
+```
+
+
+The average **"out of sample error"** is around **4.3 %**. In each of the datasets the error rate varies from 3-5 %, but the average is 4.3 % which is quite low.
+
+```{r}
+# Create a vector with the names of the datasets
+datasets <- c("group2", "group3", "group4", "group5", "group6", "group7","group8",
+              "group9","group10")
+
+# Create a vector with the estimated error rate of each dataset
+error.rate <- c(1-mean(predict(model.rm, newdata= group2) == group2$classe),
+                1-mean(predict(model.rm, newdata= group3) == group3$classe),
+                1-mean(predict(model.rm, newdata= group4) == group4$classe),
+                1-mean(predict(model.rm, newdata= group5) == group5$classe),
+                1-mean(predict(model.rm, newdata= group6) == group6$classe),
+                1-mean(predict(model.rm, newdata= group7) == group7$classe),
+                1-mean(predict(model.rm, newdata= group8) == group8$classe),
+                1-mean(predict(model.rm, newdata= group9) == group9$classe),
+                1-mean(predict(model.rm, newdata= group10) == group10$classe))
+
+# Create and print a table of out of sample error rates
+outofsample  <- as.data.frame(cbind(datasets,error.rate))
+outofsample
+
+# Print the average error rate.
+mean(as.numeric(as.character(outofsample$error.rate)))
+```
+
+## Results & Conclusions
+So finally, after attempting with 2 different ways to build a model to predict 
+the the manner in which they did the exercise we concluded that the **random forest algorithm is the best one to use**. This prediction model has an **out of sample error of 4.3%** which is acceptable.  
+In the future, we could try to improve this model by e.g. reduce the oveffiting.
+The **"in the sample"** error rate is 0 which indicates some overfitting. If we 
+managed to have a slighter higher error rate then the out of sample error rate 
+may decreased further.
+
+
+## References
+1) http://groupware.les.inf.puc-rio.br/har
+2) http://en.wikipedia.org/wiki/Decision_tree_learning
+3) http://en.wikipedia.org/wiki/Random_forest
+
+
